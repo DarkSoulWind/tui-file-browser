@@ -66,7 +66,7 @@ executable file-browser
     -- other-extensions:
 
     -- Other library packages from which modules are imported.
-    build-depends:    base, brick, vty, vty-crossplatform, microlens, microlens-mtl, microlens-th, mtl, vector, directory, filepath, file-browser, text
+    build-depends:    base, brick, vty, vty-crossplatform, microlens, microlens-mtl, microlens-th, mtl, vector, directory, filepath, unix, text, file-browser
 
     -- Directories containing source files.
     hs-source-dirs:   app
@@ -75,7 +75,7 @@ executable file-browser
     default-language: Haskell2010
 
 library
-    exposed-modules:     UI.RenameFileDialog, UI.DeleteFileDialog
+    exposed-modules:     UI.RenameFileDialog, UI.DeleteFileDialog, UI.AddFileDialog
     build-depends:       base, brick, vty, vty-crossplatform, microlens, microlens-mtl, microlens-th, mtl, vector, directory, filepath, text
     hs-source-dirs:      src
     default-language:    Haskell2010
