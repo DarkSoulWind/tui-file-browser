@@ -3,7 +3,7 @@
 
 module Main (handleDelete, main) where
 
-import Control.Monad.State (MonadIO (liftIO), void, when)
+import Control.Monad.State (MonadIO (liftIO), guard, void, when)
 import Lens.Micro.Mtl
 #if !(MIN_VERSION_base(4,11,0))
 import Data.Monoid
@@ -15,6 +15,8 @@ import qualified Brick.Types as T
 import qualified Brick.Widgets.Center as C
 import qualified Brick.Widgets.List as L
 import qualified Data.Text as T
+import Data.Time.Clock.POSIX
+import Data.Time.Format
 import qualified Data.Vector as Vec
 import qualified Graphics.Vty as V
 import Lens.Micro
@@ -22,9 +24,13 @@ import Lens.Micro.TH (makeLenses)
 import System.Directory (canonicalizePath, doesFileExist, listDirectory, removeFile, renameFile, setCurrentDirectory)
 import System.FilePath (takeDirectory)
 import System.Posix.Files
+
 import qualified UI.AddFileDialog as AFD
 import qualified UI.DeleteFileDialog as DFD
 import qualified UI.RenameFileDialog as RFD
+
+unixTimeToDateString :: Integer -> String
+unixTimeToDateString unixTime = formatTime defaultTimeLocale "%Y-%m-%d %H:%M:%S" $ posixSecondsToUTCTime $ realToFrac unixTime
 
 instance Show FileStatus where
     show fileStatus =
@@ -61,18 +67,28 @@ drawUI st = [ui]
     l = st ^. dirList
     total = Vec.length $ l ^. L.listElementsL
     box =
-        if total == 0
-            then str "Empty directory"
-            else C.hCenter $ L.renderList listDrawElement True l
+        padAll 1 $
+            if total == 0
+                then str "Empty directory"
+                else L.renderList listDrawElement True l
+    size = read . show . fileSize $ st ^. currentFileStatus :: Int
+    permissions = show . fileMode $ st ^. currentFileStatus
+    lastModTime = read . show . modificationTime $ st ^. currentFileStatus :: Integer
+    status =
+        withAttr fileStatusAttr $
+            hBox
+                [ str $ unixTimeToDateString lastModTime
+                , str " "
+                , str permissions
+                , str " "
+                , str $ formatSize size
+                ]
+    cwdLabel = withAttr cwdAttr . str $ st ^. cwd
     ui =
         vBox
-            [ str $ "Current directory: " ++ st ^. cwd
+            [ cwdLabel
             , box
-            , str "q to quit"
-            , str "d to delete file"
-            , str "r to rename file"
-            , str "a to add file"
-            , str (show (fileSize $ st ^. currentFileStatus) ++ "B")
+            , status
             ]
 
 exitDirectory :: T.EventM () AppState ()
@@ -116,10 +132,10 @@ appEvent (T.VtyEvent e) =
         V.EvKey (V.KChar 'r') [] -> modify (setExitStatus Rename) >> halt
         V.EvKey (V.KChar 'd') [] -> modify (setExitStatus Delete) >> halt
         ev -> do
+            zoom dirList $ L.handleListEventVi L.handleListEvent ev
             st <- get
             currentFileSt <- liftIO $ getStatusOfCurrentFile $ st ^. dirList
-            put $ st & currentFileStatus .~ currentFileSt
-            zoom dirList $ L.handleListEventVi L.handleListEvent ev
+            modify $ \s -> s & currentFileStatus .~ currentFileSt
 appEvent _ = return ()
 
 listDrawElement :: Bool -> Listing -> Widget ()
@@ -162,13 +178,16 @@ initState p = do
     fileStatus <- getStatusOfCurrentFile theDirectoryList
     return $ AppState absPath theDirectoryList None fileStatus
 
-customAttr, dirAttr, dirSelectedAttr :: A.AttrName
+customAttr, dirAttr, dirSelectedAttr, fileStatusAttr :: A.AttrName
 customAttr = L.listSelectedAttr <> A.attrName "custom"
 dirAttr = A.attrName "directory"
 dirSelectedAttr = A.attrName "directory-selected"
+fileStatusAttr = A.attrName "file-status"
+cwdAttr = A.attrName "cwd"
 
-customBlue :: V.Color
+customBlue, customAzure :: V.Color
 customBlue = V.linearColor 4 174 245
+customAzure = V.linearColor 39 121 125
 
 theMap :: A.AttrMap
 theMap =
@@ -178,6 +197,8 @@ theMap =
         , (customAttr, fg V.black)
         , (dirAttr, fg customBlue `V.withStyle` V.bold)
         , (dirSelectedAttr, V.black `on` customBlue `V.withStyle` V.bold)
+        , (fileStatusAttr, fg customAzure)
+        , (cwdAttr, fg customAzure `V.withStyle` V.underline)
         ]
 
 theApp :: M.App AppState e ()
@@ -250,6 +271,15 @@ runApp file = do
                 writeFile newFile ""
                 runApp $ newState ^. cwd
 
+formatSizeHelper :: Int -> [String] -> String
+formatSizeHelper n postfixes
+    | n >= 1000 = formatSizeHelper (n `div` 1000) (tail postfixes)
+    | otherwise = show n ++ head postfixes
+
+formatSize :: Int -> String
+formatSize = flip formatSizeHelper ["B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"]
+
 main :: IO ()
 main = do
     runApp "."
+    print $ formatSize 6969
